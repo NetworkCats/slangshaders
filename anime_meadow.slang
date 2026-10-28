@@ -963,18 +963,26 @@ float3 trackLocal(float2 g, int i0, int i1, out float2 dir)
     return r;
 }
 
-float3 trackNearest(float2 g, out float2 dir)
+// line: which track won - 0 the main line, 1 and 2 the spurs.
+float3 trackNearest(float2 g, out float2 dir, out int line)
 {
     float2 d1;
     float2 d2;
     float3 a = trackLocal(g, TRACK_MAIN0, TRACK_MAIN1, dir);
     float3 b = trackLocal(g, TRACK_A0, TRACK_A1, d1);
     float3 c = trackLocal(g, TRACK_B0, TRACK_B1, d2);
+    line = 0;
     // A spur's first metres overlap the main line at its turnout: there the
     // main line wins, so the two run into each other smoothly.
-    if (abs(b.x) + b.z < abs(a.x) + a.z) { a = b; dir = d1; }
-    if (abs(c.x) + c.z < abs(a.x) + a.z) { a = c; dir = d2; }
+    if (abs(b.x) + b.z < abs(a.x) + a.z) { a = b; dir = d1; line = 1; }
+    if (abs(c.x) + c.z < abs(a.x) + a.z) { a = c; dir = d2; line = 2; }
     return a;
+}
+
+float3 trackNearest(float2 g, out float2 dir)
+{
+    int line;
+    return trackNearest(g, dir, line);
 }
 
 // How much track bed (ballast) covers field point g, 0..1, with a ragged edge.
@@ -1192,17 +1200,22 @@ void bridgeSDF(inout SHit h, float3 wp)
 void trackSDF(inout SHit h, float3 wp)
 {
     float2 dir;
-    float3 tr = trackNearest(wp.xz, dir);
+    int line;
+    float3 tr = trackNearest(wp.xz, dir, line);
     float off = tr.x;
     float y = wp.y - terrainH(wp.xz);
     float past = tr.z;
     float3 tp = float3(off, y, tr.y);
     float bed = max(max(y - 0.25, (abs(off) - 2.05 + 1.8 * y) / 2.06), max(-y - 0.4, past - 1.6));
     addHit(h, bed, M_BALLAST, tp, y);
-    // Sleepers: 2.6 m long, 26 cm wide, every 1.4 m, their tops just proud of the stones.
-    float sc = (frac(tr.y / 1.4) - 0.5) * 1.4;
-    float sl = max(sdBox(float3(sc, y - 0.27, off), float3(0.13, 0.08, 1.30)), past - 0.25);
-    addHit(h, sl, M_SLEEPER, tp, y);
+    // Sleepers: 2.6 m long, their tops just proud of the stones; 26 cm wide every
+    // 1.4 m on the main line, the spurs' older ones 42 cm wide and 2.4 m apart.
+    float sp = line == 0 ? 1.4 : 2.4;
+    float sw = line == 0 ? 0.13 : 0.21;
+    float sc = (frac(tr.y / sp) - 0.5) * sp;
+    float sl = max(sdBox(float3(sc, y - 0.27, off), float3(sw, 0.08, 1.30)), past - 0.25);
+    // lp.z in sleeper spacings, so each sleeper can be told apart when shaded.
+    addHit(h, sl, M_SLEEPER, float3(off, y, tr.y / sp), y);
     float ro = abs(abs(off) - GAUGE_HALF);
     float plate = max(sdBox(float3(sc, y - 0.36, ro), float3(0.10, 0.012, 0.11)), past - 0.25);
     addHit(h, plate, M_METAL, tp, y);
@@ -1677,7 +1690,7 @@ float3 yardAlbedo(int mat, float3 lp, float3 n, float ag, float fp, out float gl
     {
         // Weathered creosoted timber: grain along the sleeper, split ends, each one
         // its own shade of grey-brown.
-        float id = floor(lp.z / 1.4);
+        float id = floor(lp.z);
         float grain = posterize(vnoise(float2(lp.x * 1.5, id * 7.0)), 2.0);
         float3 c = lerp(float3(0.17, 0.13, 0.10), float3(0.26, 0.23, 0.20), posterize(hash11(id + 3.1), 3.0));
         return c * (0.82 + 0.30 * grain) * lerp(0.80, 1.0, smoothstep(1.30, 1.15, abs(lp.x)));
