@@ -1,0 +1,7 @@
+.DS_Store
+
+# Build output (compiled shaders, rendered frames)
+build/
+
+# Compiled offline renderer (built from tools/render.swift)
+tools/render
